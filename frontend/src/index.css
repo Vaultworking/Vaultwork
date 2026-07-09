@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-text;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-primary {
+    @apply bg-success text-white hover:bg-success/90;
+  }
+  
+  .btn-secondary {
+    @apply bg-surface2 text-text hover:bg-surface2/80 border border-border;
+  }
+  
+  .btn-danger {
+    @apply bg-danger text-white hover:bg-danger/90;
+  }
+  
+  .card {
+    @apply bg-surface rounded-xl border border-border p-6;
+  }
+  
+  .input {
+    @apply w-full bg-surface2 border border-border rounded-lg px-4 py-2 text-text placeholder:text-text2 focus:outline-none focus:border-success;
+  }
+  
+  .badge {
+    @apply px-3 py-1 rounded-full text-sm font-medium;
+  }
+  
+  .badge-pending {
+    @apply bg-warning/20 text-warning;
+  }
+  
+  .badge-delivered {
+    @apply bg-blue-500/20 text-blue-400;
+  }
+  
+  .badge-approved {
+    @apply bg-success/20 text-success;
+  }
+  
+  .badge-disputed {
+    @apply bg-danger/20 text-danger;
+  }
+  
+  .badge-resolved {
+    @apply bg-purple-500/20 text-purple-400;
+  }
+  
+  .badge-released {
+    @apply bg-success/20 text-success;
+  }
+}
