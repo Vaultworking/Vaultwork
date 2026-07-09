@@ -47,7 +47,7 @@ export default function CreateProject() {
 
   const [formData, setFormData] = useState({
     freelancer: '',
-    token: '0x036555e7e6E0f560C3B4Bf0Ee5e4c2d0C8B8B8B8', // USDC on Base Sepolia (placeholder)
+    token: '0x7169D38820F8C5AdE8C61a789B022d207993A047', // USDC on Base Sepolia
     arbiter: '',
     reviewWindowSeconds: '604800' // 7 days
   })

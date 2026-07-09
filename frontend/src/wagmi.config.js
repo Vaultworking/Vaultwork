@@ -3,7 +3,7 @@ import { getDefaultConfig } from '@rainbow-me/rainbowkit'
 
 export const config = getDefaultConfig({
   appName: 'Vaultwork',
-  projectId: 'YOUR_PROJECT_ID', // Replace with WalletConnect project ID
+  projectId: import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || 'YOUR_PROJECT_ID',
   chains: [baseSepolia],
   ssr: true,
 })
