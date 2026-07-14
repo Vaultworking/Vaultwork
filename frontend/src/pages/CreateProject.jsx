@@ -1,53 +1,18 @@
 import { useState } from 'react'
-import { useAccount, useWriteContract, useReadContract } from 'wagmi'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Trash2, Loader2 } from 'lucide-react'
 
-const FACTORY_ADDRESS = '0x0000000000000000000000000000000000000000' // Replace with deployed address
+const FACTORY_ADDRESS = 'STELLAR_FACTORY_ADDRESS_HERE' // Replace with deployed address
+const USDC_ADDRESS = 'STELLAR_USDC_ADDRESS_HERE' // Replace with Stellar USDC address
 
-const FACTORY_ABI = [
-  {
-    "inputs": [
-      {"name": "freelancer", "type": "address"},
-      {"name": "token", "type": "address"},
-      {"name": "arbiter", "type": "address"},
-      {"name": "milestoneAmounts", "type": "uint256[]"},
-      {"name": "milestoneDescriptions", "type": "string[]"},
-      {"name": "reviewWindowSeconds", "type": "uint256"}
-    ],
-    "name": "createProject",
-    "outputs": [{"name": "escrowAddress", "type": "address"}],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  }
-]
-
-const ERC20_ABI = [
-  {
-    "inputs": [{"name": "spender", "type": "address"}, {"name": "amount", "type": "uint256"}],
-    "name": "approve",
-    "outputs": [{"name": "", "type": "bool"}],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [{"name": "owner", "type": "address"}, {"name": "spender", "type": "address"}],
-    "name": "allowance",
-    "outputs": [{"name": "", "type": "uint256"}],
-    "stateMutability": "view",
-    "type": "function"
-  }
-]
-
-export default function CreateProject() {
-  const { address, isConnected } = useAccount()
+export default function CreateProject({ walletAddress }) {
   const navigate = useNavigate()
-  const { writeContract: createProject, isPending: isCreating } = useWriteContract()
-  const { writeContract: approveToken, isPending: isApproving } = useWriteContract()
+  const [isCreating, setIsCreating] = useState(false)
+  const [isApproving, setIsApproving] = useState(false)
 
   const [formData, setFormData] = useState({
     freelancer: '',
-    token: '0x7169D38820F8C5AdE8C61a789B022d207993A047', // USDC on Base Sepolia
+    token: USDC_ADDRESS,
     arbiter: '',
     reviewWindowSeconds: '604800' // 7 days
   })
@@ -82,12 +47,11 @@ export default function CreateProject() {
     e.preventDefault()
     setError('')
 
-    if (!isConnected) {
-      setError('Please connect your wallet')
+    if (!walletAddress) {
+      setError('Please connect your wallet first')
       return
     }
 
-    // Validation
     if (!formData.freelancer || !formData.arbiter) {
       setError('Please fill in all required fields')
       return
@@ -104,46 +68,32 @@ export default function CreateProject() {
     const totalAmount = calculateTotal()
 
     try {
-      // First approve token spending
-      await approveToken({
-        address: formData.token,
-        abi: ERC20_ABI,
-        functionName: 'approve',
-        args: [FACTORY_ADDRESS, totalAmount]
+      setIsCreating(true)
+      // TODO: Replace with actual Stellar SDK calls to create project
+      // For now, this is a placeholder
+      console.log('Creating project with:', {
+        client: walletAddress,
+        freelancer: formData.freelancer,
+        token: formData.token,
+        arbiter: formData.arbiter,
+        milestoneAmounts,
+        milestoneDescriptions,
+        reviewWindowSeconds: Number(formData.reviewWindowSeconds)
       })
-
-      // Then create project
-      createProject({
-        address: FACTORY_ADDRESS,
-        abi: FACTORY_ABI,
-        functionName: 'createProject',
-        args: [
-          formData.freelancer,
-          formData.token,
-          formData.arbiter,
-          milestoneAmounts,
-          milestoneDescriptions,
-          Number(formData.reviewWindowSeconds)
-        ]
-      }, {
-        onSuccess: (data) => {
-          navigate(`/project/${data}`)
-        },
-        onError: (err) => {
-          setError(err.message || 'Failed to create project')
-        }
-      })
+      alert('Project creation functionality will be implemented with Stellar SDK')
     } catch (err) {
-      setError(err.message || 'Transaction failed')
+      setError(err.message || 'Failed to create project')
+    } finally {
+      setIsCreating(false)
     }
   }
 
-  if (!isConnected) {
+  if (!walletAddress) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-text mb-4">Connect Your Wallet</h1>
-          <p className="text-text2">Please connect your wallet to create a project</p>
+          <p className="text-text2">Please connect your Freighter wallet to create a project</p>
         </div>
       </div>
     )
@@ -166,7 +116,7 @@ export default function CreateProject() {
             <input
               type="text"
               className="input"
-              placeholder="0x..."
+              placeholder="G..."
               value={formData.freelancer}
               onChange={(e) => setFormData({ ...formData, freelancer: e.target.value })}
               required
@@ -174,7 +124,7 @@ export default function CreateProject() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-text mb-2">Token Address (USDC on Base Sepolia)</label>
+            <label className="block text-sm font-medium text-text mb-2">Token Address (USDC on Stellar)</label>
             <input
               type="text"
               className="input"
@@ -188,7 +138,7 @@ export default function CreateProject() {
             <input
               type="text"
               className="input"
-              placeholder="0x..."
+              placeholder="G..."
               value={formData.arbiter}
               onChange={(e) => setFormData({ ...formData, arbiter: e.target.value })}
               required
@@ -278,10 +228,10 @@ export default function CreateProject() {
         {/* Submit */}
         <button
           type="submit"
-          disabled={isCreating || isApproving}
+          disabled={isCreating}
           className="btn btn-primary w-full flex items-center justify-center gap-2"
         >
-          {(isCreating || isApproving) ? (
+          {isCreating ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin" />
               Processing...
