@@ -1,11 +1,7 @@
 import { Link } from 'react-router-dom'
-import { useAccount } from 'wagmi'
-import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { Shield, Clock, Users, ArrowRight } from 'lucide-react'
 
-export default function Landing() {
-  const { isConnected } = useAccount()
-
+export default function Landing({ walletAddress }) {
   return (
     <div className="min-h-screen">
       {/* Hero Section */}
@@ -16,16 +12,18 @@ export default function Landing() {
             <span className="text-success"> Milestone Escrow</span>
           </h1>
           <p className="text-xl text-text2 mb-8 max-w-2xl mx-auto">
-            Secure freelance payments on Base Sepolia. Release funds only when milestones are delivered and approved.
+            Secure freelance payments on Stellar. Release funds only when milestones are delivered and approved.
           </p>
           <div className="flex justify-center gap-4">
-            {isConnected ? (
+            {walletAddress ? (
               <Link to="/dashboard" className="btn btn-primary text-lg px-8 py-3">
                 Go to Dashboard
                 <ArrowRight className="inline ml-2 w-5 h-5" />
               </Link>
             ) : (
-              <ConnectButton />
+              <button className="btn btn-primary text-lg px-8 py-3">
+                Connect Wallet to Get Started
+              </button>
             )}
           </div>
         </div>
@@ -95,7 +93,7 @@ export default function Landing() {
       <div className="border-t border-border mt-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <p className="text-center text-text2 text-sm">
-            Built on Base Sepolia • Smart Contract Powered
+            Built on Stellar • Smart Contract Powered
           </p>
         </div>
       </div>

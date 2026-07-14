@@ -1,21 +1,20 @@
 # Vaultwork - Milestone Escrow for Freelance Payments
 
-A trust-minimized escrow system for freelance milestone payments on Base Sepolia, built with Solidity smart contracts and a React frontend.
+A trust-minimized escrow system for freelance milestone payments on Stellar, built with Soroban smart contracts (Rust) and a React frontend.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Solidity](https://img.shields.io/badge/Solidity-^0.8.20-blue.svg)](https://soliditylang.org/)
-[![Base](https://img.shields.io/badge/Base-Sepolia-purple.svg)](https://www.base.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](https://www.rust-lang.org/)
+[![Stellar](https://img.shields.io/badge/Stellar-Soroban-purple.svg)](https://www.stellar.org/)
 [![React](https://img.shields.io/badge/React-18-blue.svg)](https://reactjs.org/)
 [![Vite](https://img.shields.io/badge/Vite-5.0-646CFF.svg)](https://vitejs.dev/)
-[![Foundry](https://img.shields.io/badge/Foundry-Foundry-orange.svg)](https://getfoundry.sh/)
 
 ## Architecture Overview
 
-Vaultwork uses a factory pattern with EIP-1167 minimal proxies for gas-efficient deployment of escrow contracts.
+Vaultwork uses Soroban smart contracts for milestone-based escrow payments between clients and freelancers on the Stellar network.
 
 ### Smart Contracts
 
-#### MilestoneEscrow.sol
+#### MilestoneEscrow (Rust/Soroban)
 Core escrow contract that manages milestone-based payments between a client and freelancer.
 
 **Key Features:**
@@ -24,8 +23,7 @@ Core escrow contract that manages milestone-based payments between a client and 
 - Client approves milestones to release payments
 - Auto-release after review window expires (default 7 days)
 - Dispute resolution via trusted arbiter
-- Reentrancy protection using OpenZeppelin's ReentrancyGuard
-- SafeERC20 for secure token transfers
+- Built with soroban-sdk for Stellar smart contract development
 
 **State Machine:**
 ```
@@ -34,18 +32,18 @@ Pending → Delivered → (approve) → Approved/Released
                   → (raiseDispute) → Disputed → (resolveDispute) → Resolved
 ```
 
-#### EscrowFactory.sol
-Factory contract that deploys MilestoneEscrow instances using EIP-1167 minimal proxies for gas efficiency. Provides indexing functions for querying escrows by participant.
+#### EscrowFactory (Rust/Soroban)
+Factory contract that deploys MilestoneEscrow instances. Provides indexing functions for querying escrows by participant.
 
 **Key Features:**
-- Deploys minimal proxy clones of MilestoneEscrow
+- Deploys MilestoneEscrow contracts
 - Maintains mappings of escrows by client and freelancer
 - Emits ProjectCreated events for off-chain indexing
 - Transferable ownership
 
 ### Frontend
 
-Built with React, Vite, Tailwind CSS, wagmi, and viem for Web3 integration. Uses RainbowKit for wallet connection UI.
+Built with React, Vite, Tailwind CSS, and Stellar SDK for Web3 integration. Uses Freighter wallet for Stellar wallet connection.
 
 **Pages:**
 - **Landing**: Product explainer with wallet connection
@@ -82,29 +80,38 @@ stateDiagram-v2
 
 ### Prerequisites
 - Node.js 18+ for frontend development
-- Foundry for smart contract development
-- Git for version control (optional, for contract testing/deployment)
+- Rust 1.70+ for Soroban smart contract development
+- stellar-cli for Soroban contract deployment
+- Freighter wallet extension for Stellar wallet connection
 
 ### Smart Contracts
 
-1. Install Foundry (if not already installed):
+1. Install Rust (if not already installed):
 ```bash
-curl -L https://foundry.paradigm.xyz | bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-2. Install OpenZeppelin contracts:
+2. Install stellar-cli:
 ```bash
-forge install OpenZeppelin/openzeppelin-contracts
+cargo install stellar-cli
 ```
 
-3. Run tests:
+3. Build contracts:
 ```bash
-forge test
+cd contracts/milestone_escrow
+cargo build --target wasm32-unknown-unknown --release
+
+cd ../escrow_factory
+cargo build --target wasm32-unknown-unknown --release
 ```
 
-4. Check coverage:
+4. Run tests:
 ```bash
-forge coverage
+cd contracts/milestone_escrow
+cargo test
+
+cd ../escrow_factory
+cargo test
 ```
 
 ### Frontend
@@ -115,57 +122,49 @@ cd frontend
 npm install
 ```
 
-2. Set up environment variables:
-```bash
-cp ../.env.example .env
-```
-Edit `.env` with your WalletConnect project ID from https://cloud.walletconnect.com/
-
-3. Run development server:
+2. Run development server:
 ```bash
 npm run dev
 ```
 The app will be available at http://localhost:3000
 
-4. Build for production:
+3. Build for production:
 ```bash
 npm run build
 ```
 
 ## Deployment
 
-### Deploy to Base Sepolia
+### Deploy to Stellar Testnet
 
-1. Deploy the implementation and factory:
+1. Configure Stellar network:
 ```bash
-export RPC_URL=https://sepolia.base.org
-export PRIVATE_KEY=your_private_key
+stellar network switch testnet
 ```
 
-2. Run deployment script:
+2. Deploy MilestoneEscrow contract:
 ```bash
-forge script script/Deploy.s.sol --rpc-url $RPC_URL --broadcast --verify -e
+cd contracts/milestone_escrow
+stellar contract deploy --wasm target/wasm32-unknown-unknown/release/milestone_escrow.wasm
 ```
-The `-e` flag enables Etherscan verification on Base Sepolia.
 
-3. Update frontend with deployed factory address:
+3. Deploy EscrowFactory contract:
+```bash
+cd contracts/escrow_factory
+stellar contract deploy --wasm target/wasm32-unknown-unknown/release/escrow_factory.wasm --source <YOUR_WALLET_ADDRESS> -- --owner <YOUR_WALLET_ADDRESS>
+```
+
+4. Update frontend with deployed factory address:
 Edit `frontend/src/pages/Dashboard.jsx`, `frontend/src/pages/CreateProject.jsx`, and `frontend/src/pages/ProjectDetail.jsx` to replace the placeholder factory address.
-
-### Verify on Basescan
-
-```bash
-forge verify-contract <FACTORY_ADDRESS> src/EscrowFactory.sol:EscrowFactory --chain-id 84532
-```
-Replace `<FACTORY_ADDRESS>` with the deployed factory address from the deployment output.
 
 ## Usage
 
 ### Creating a Project
 
-1. Connect wallet as client
+1. Connect Freighter wallet as client
 2. Navigate to "Create Project"
-3. Enter freelancer address, arbiter address, and milestone details
-4. Approve USDC spending and confirm transaction
+3. Enter freelancer address (Stellar public key), arbiter address, and milestone details
+4. Approve token spending and confirm transaction
 5. Project is created and appears in dashboard
 6. Fund the project by transferring the total escrow amount
 
@@ -191,36 +190,30 @@ The test suite covers:
 - Timeout auto-release
 - Dispute resolution with partial split
 - Access control failures
-- Reentrancy attack simulation
 - Edge cases (double-approve, approve before delivery, etc.)
-- Factory pattern and minimal proxy deployment
+- Factory pattern and contract deployment
 
 Run tests:
 ```bash
-forge test
-```
+cd contracts/milestone_escrow
+cargo test
 
-Run with coverage:
-```bash
-forge coverage --report lcov
-```
-View coverage report:
-```bash
-genhtml lcov.info -o coverage
-open coverage/index.html
+cd contracts/escrow_factory
+cargo test
 ```
 
 ## Known Limitations
 
-See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) for v1 scope cuts and future improvements.
+- Token integration needs to be implemented with Stellar SEP-41 token standard
+- Cross-contract calls for token transfers need to be added
+- Frontend Stellar SDK integration is currently using placeholder data
+- Deployment scripts need to be created for automated deployment
 
 ## Security
 
-- Uses OpenZeppelin's audited contracts (ReentrancyGuard, SafeERC20, Ownable)
-- Checks-effects-interactions pattern on all fund-moving functions
-- Reentrancy protection on critical functions
+- Uses soroban-sdk for secure Stellar smart contract development
 - Access control on all state-changing functions
-- Integer overflow protection (Solidity ^0.8.20)
+- Proper error handling with custom error types
 - Security contact: security@vaultwork.io
 
 ## License
