@@ -144,6 +144,87 @@ impl MilestoneEscrow {
         Ok(())
     }
 
+    pub fn create_project(
+        env: Env,
+        client: Address,
+        freelancer: Address,
+        token: Address,
+        arbiter: Address,
+        milestone_amounts: Vec<i128>,
+        milestone_descriptions: Vec<SorobanString>,
+        review_window_seconds: u64,
+    ) -> Result<(), Error> {
+        Self::lock_guard(&env);
+        
+        client.require_auth();
+        
+        if env.storage().instance().has(&symbol_short!("init")) {
+            Self::unlock_guard(&env);
+            return Err(Error::AlreadyInitialized);
+        }
+        
+        if milestone_amounts.is_empty() {
+            Self::unlock_guard(&env);
+            return Err(Error::NoMilestones);
+        }
+        if milestone_amounts.len() != milestone_descriptions.len() {
+            Self::unlock_guard(&env);
+            return Err(Error::ArrayLengthMismatch);
+        }
+        if review_window_seconds == 0 {
+            Self::unlock_guard(&env);
+            return Err(Error::InvalidReviewWindow);
+        }
+
+        let mut total_amount: i128 = 0;
+        let milestones: Vec<Milestone> = {
+            let mut result = Vec::new(&env);
+            for i in 0..milestone_amounts.len() {
+                let amount = milestone_amounts.get(i).unwrap();
+                let desc = milestone_descriptions.get(i).unwrap();
+                if amount <= 0 {
+                    Self::unlock_guard(&env);
+                    panic!("Milestone amount must be positive");
+                }
+                total_amount += amount;
+                result.push_back(Milestone {
+                    amount,
+                    description: desc.clone(),
+                    state: MilestoneState::Pending,
+                    delivery_timestamp: 0,
+                });
+            }
+            result
+        };
+
+        // Transfer tokens from client to contract atomically
+        let contract_address = env.current_contract_address();
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer(&client, &contract_address, &total_amount);
+
+        let data = DataKey {
+            client: client.clone(),
+            freelancer: freelancer.clone(),
+            token: token.clone(),
+            arbiter: arbiter.clone(),
+            review_window_seconds,
+            total_escrow_amount: total_amount,
+            is_funded: true,
+        };
+
+        env.storage().instance().set(&symbol_short!("init"), &true);
+        env.storage().instance().set(&symbol_short!("data"), &data);
+        env.storage().instance().set(&symbol_short!("mstones"), &milestones);
+
+        env.events().publish(
+            (symbol_short!("created"), client),
+            (total_amount, milestone_amounts.len(), env.ledger().timestamp()),
+        );
+
+        Self::unlock_guard(&env);
+        Ok(())
+    }
+
     pub fn fund(env: Env, client: Address, token: Address) -> Result<(), Error> {
         Self::lock_guard(&env);
         
