@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, Vec, symbol_short, String as SorobanString};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, Vec, symbol_short, String as SorobanString, token};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -141,8 +141,11 @@ impl MilestoneEscrow {
             return Err(Error::InvalidToken);
         }
 
-        // Token transfer would be handled via cross-contract call
-        // For now, we'll mark as funded
+        // Transfer tokens from client to contract
+        let contract_address = env.current_contract_address();
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer(&client, &contract_address, &data.total_escrow_amount);
+
         let mut updated_data = data.clone();
         updated_data.is_funded = true;
         env.storage().instance().set(&symbol_short!("data"), &updated_data);
@@ -221,7 +224,11 @@ impl MilestoneEscrow {
             return Err(Error::MilestoneNotDelivered);
         }
 
-        // Token transfer would be handled via cross-contract call
+        // Transfer milestone amount to freelancer
+        let contract_address = env.current_contract_address();
+        let token_client = token::Client::new(&env, &data.token);
+        token_client.transfer(&contract_address, &data.freelancer, &milestone.amount);
+
         milestones.set(milestone_index, Milestone {
             amount: milestone.amount,
             description: milestone.description.clone(),
@@ -323,7 +330,17 @@ impl MilestoneEscrow {
         let client_amount = (amount * client_bps as i128) / 10000;
         let freelancer_amount = amount - client_amount;
 
-        // Token transfers would be handled via cross-contract calls
+        // Transfer tokens to client and freelancer based on arbiter decision
+        let contract_address = env.current_contract_address();
+        let token_client = token::Client::new(&env, &data.token);
+        
+        if client_amount > 0 {
+            token_client.transfer(&contract_address, &data.client, &client_amount);
+        }
+        if freelancer_amount > 0 {
+            token_client.transfer(&contract_address, &data.freelancer, &freelancer_amount);
+        }
+
         milestones.set(milestone_index, Milestone {
             amount: milestone.amount,
             description: milestone.description.clone(),
@@ -371,7 +388,11 @@ impl MilestoneEscrow {
             return Err(Error::ReviewWindowNotExpired);
         }
 
-        // Token transfer would be handled via cross-contract call
+        // Transfer milestone amount to freelancer after timeout
+        let contract_address = env.current_contract_address();
+        let token_client = token::Client::new(&env, &data.token);
+        token_client.transfer(&contract_address, &data.freelancer, &milestone.amount);
+
         milestones.set(milestone_index, Milestone {
             amount: milestone.amount,
             description: milestone.description.clone(),
