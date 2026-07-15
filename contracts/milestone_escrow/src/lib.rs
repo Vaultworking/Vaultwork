@@ -57,11 +57,30 @@ pub struct DataKey {
     pub is_funded: bool,
 }
 
+#[contracttype]
+#[derive(Copy, Clone, PartialEq)]
+pub enum ReentrancyGuard {
+    Unlocked = 0,
+    Locked = 1,
+}
+
 #[contract]
 pub struct MilestoneEscrow;
 
 #[contractimpl]
 impl MilestoneEscrow {
+    fn lock_guard(env: &Env) {
+        let guard: ReentrancyGuard = env.storage().instance().get(&symbol_short!("guard")).unwrap_or(ReentrancyGuard::Unlocked);
+        if guard == ReentrancyGuard::Locked {
+            panic!("Reentrancy detected");
+        }
+        env.storage().instance().set(&symbol_short!("guard"), &ReentrancyGuard::Locked);
+    }
+
+    fn unlock_guard(env: &Env) {
+        env.storage().instance().set(&symbol_short!("guard"), &ReentrancyGuard::Unlocked);
+    }
+
     pub fn initialize(
         env: Env,
         client: Address,
@@ -126,18 +145,23 @@ impl MilestoneEscrow {
     }
 
     pub fn fund(env: Env, client: Address, token: Address) -> Result<(), Error> {
+        Self::lock_guard(&env);
+        
         client.require_auth();
         
         let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)?;
         
         if data.client != client {
+            Self::unlock_guard(&env);
             return Err(Error::NotClient);
         }
         if data.is_funded {
+            Self::unlock_guard(&env);
             return Err(Error::AlreadyFunded);
         }
         if data.token != token {
+            Self::unlock_guard(&env);
             return Err(Error::InvalidToken);
         }
 
@@ -155,19 +179,24 @@ impl MilestoneEscrow {
             (data.total_escrow_amount, env.ledger().sequence()),
         );
 
+        Self::unlock_guard(&env);
         Ok(())
     }
 
     pub fn mark_delivered(env: Env, freelancer: Address, milestone_index: u32) -> Result<(), Error> {
+        Self::lock_guard(&env);
+        
         freelancer.require_auth();
         
         let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)?;
         
         if data.freelancer != freelancer {
+            Self::unlock_guard(&env);
             return Err(Error::NotClient);
         }
         if !data.is_funded {
+            Self::unlock_guard(&env);
             return Err(Error::NotFunded);
         }
 
@@ -176,11 +205,13 @@ impl MilestoneEscrow {
         
         let len = milestones.len();
         if milestone_index >= len {
+            Self::unlock_guard(&env);
             return Err(Error::InvalidMilestoneIndex);
         }
         
         let milestone = milestones.get(milestone_index).unwrap();
         if milestone.state != MilestoneState::Pending {
+            Self::unlock_guard(&env);
             return Err(Error::MilestoneNotPending);
         }
 
@@ -198,16 +229,20 @@ impl MilestoneEscrow {
             env.ledger().timestamp(),
         );
 
+        Self::unlock_guard(&env);
         Ok(())
     }
 
     pub fn approve(env: Env, client: Address, milestone_index: u32) -> Result<(), Error> {
+        Self::lock_guard(&env);
+        
         client.require_auth();
         
         let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)?;
         
         if data.client != client {
+            Self::unlock_guard(&env);
             return Err(Error::NotClient);
         }
 
@@ -216,11 +251,13 @@ impl MilestoneEscrow {
         
         let len = milestones.len();
         if milestone_index >= len {
+            Self::unlock_guard(&env);
             return Err(Error::InvalidMilestoneIndex);
         }
         
         let milestone = milestones.get(milestone_index).unwrap();
         if milestone.state != MilestoneState::Delivered {
+            Self::unlock_guard(&env);
             return Err(Error::MilestoneNotDelivered);
         }
 
@@ -243,10 +280,13 @@ impl MilestoneEscrow {
             (milestone.amount, env.ledger().timestamp()),
         );
 
+        Self::unlock_guard(&env);
         Ok(())
     }
 
     pub fn raise_dispute(env: Env, caller: Address, milestone_index: u32) -> Result<(), Error> {
+        Self::lock_guard(&env);
+        
         caller.require_auth();
         
         let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
@@ -254,6 +294,7 @@ impl MilestoneEscrow {
         
         // Allow both client and freelancer to raise disputes
         if data.client != caller && data.freelancer != caller {
+            Self::unlock_guard(&env);
             return Err(Error::NotClient);
         }
 
@@ -262,11 +303,13 @@ impl MilestoneEscrow {
         
         let len = milestones.len();
         if milestone_index >= len {
+            Self::unlock_guard(&env);
             return Err(Error::InvalidMilestoneIndex);
         }
         
         let milestone = milestones.get(milestone_index).unwrap();
         if milestone.state != MilestoneState::Delivered {
+            Self::unlock_guard(&env);
             return Err(Error::MilestoneNotDelivered);
         }
 
@@ -274,6 +317,7 @@ impl MilestoneEscrow {
         let current_time = env.ledger().timestamp();
         
         if current_time >= delivery_time + data.review_window_seconds {
+            Self::unlock_guard(&env);
             return Err(Error::ReviewWindowExpired);
         }
 
@@ -291,6 +335,7 @@ impl MilestoneEscrow {
             env.ledger().timestamp(),
         );
 
+        Self::unlock_guard(&env);
         Ok(())
     }
 
@@ -300,12 +345,15 @@ impl MilestoneEscrow {
         milestone_index: u32,
         client_bps: u32,
     ) -> Result<(), Error> {
+        Self::lock_guard(&env);
+        
         arbiter.require_auth();
         
         let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)?;
         
         if data.arbiter != arbiter {
+            Self::unlock_guard(&env);
             return Err(Error::NotClient);
         }
 
@@ -314,15 +362,18 @@ impl MilestoneEscrow {
         
         let len = milestones.len();
         if milestone_index >= len {
+            Self::unlock_guard(&env);
             return Err(Error::InvalidMilestoneIndex);
         }
         
         let milestone = milestones.get(milestone_index).unwrap();
         if milestone.state != MilestoneState::Disputed {
+            Self::unlock_guard(&env);
             return Err(Error::MilestoneNotDisputed);
         }
 
         if client_bps > 10000 {
+            Self::unlock_guard(&env);
             return Err(Error::InvalidBasisPoints);
         }
 
@@ -355,16 +406,20 @@ impl MilestoneEscrow {
             (client_amount, freelancer_amount, env.ledger().timestamp()),
         );
 
+        Self::unlock_guard(&env);
         Ok(())
     }
 
     pub fn claim_after_timeout(env: Env, freelancer: Address, milestone_index: u32) -> Result<(), Error> {
+        Self::lock_guard(&env);
+        
         freelancer.require_auth();
         
         let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)?;
         
         if data.freelancer != freelancer {
+            Self::unlock_guard(&env);
             return Err(Error::NotClient);
         }
 
@@ -373,11 +428,13 @@ impl MilestoneEscrow {
         
         let len = milestones.len();
         if milestone_index >= len {
+            Self::unlock_guard(&env);
             return Err(Error::InvalidMilestoneIndex);
         }
         
         let milestone = milestones.get(milestone_index).unwrap();
         if milestone.state != MilestoneState::Delivered {
+            Self::unlock_guard(&env);
             return Err(Error::MilestoneNotDelivered);
         }
 
@@ -385,6 +442,7 @@ impl MilestoneEscrow {
         let current_time = env.ledger().timestamp();
         
         if current_time < delivery_time + data.review_window_seconds {
+            Self::unlock_guard(&env);
             return Err(Error::ReviewWindowNotExpired);
         }
 
@@ -407,19 +465,24 @@ impl MilestoneEscrow {
             (milestone.amount, env.ledger().timestamp()),
         );
 
+        Self::unlock_guard(&env);
         Ok(())
     }
 
     pub fn cancel_unfunded_project(env: Env, client: Address) -> Result<(), Error> {
+        Self::lock_guard(&env);
+        
         client.require_auth();
         
         let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)?;
         
         if data.client != client {
+            Self::unlock_guard(&env);
             return Err(Error::NotClient);
         }
         if data.is_funded {
+            Self::unlock_guard(&env);
             return Err(Error::AlreadyFunded);
         }
 
@@ -428,6 +491,7 @@ impl MilestoneEscrow {
         
         for milestone in milestones.iter() {
             if milestone.state != MilestoneState::Pending {
+                Self::unlock_guard(&env);
                 return Err(Error::ProjectAlreadyStarted);
             }
         }
@@ -437,6 +501,7 @@ impl MilestoneEscrow {
             env.ledger().timestamp(),
         );
 
+        Self::unlock_guard(&env);
         Ok(())
     }
 
