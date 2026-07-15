@@ -4,42 +4,51 @@ import Landing from './pages/Landing'
 import Dashboard from './pages/Dashboard'
 import CreateProject from './pages/CreateProject'
 import ProjectDetail from './pages/ProjectDetail'
-import { authenticateWithChallenge, checkAuthentication, setAuthenticated, logout } from './utils/auth'
+import { setAuthenticated, logout } from './utils/auth'
 
 function App() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
+  const [debugInfo, setDebugInfo] = useState<string>('')
 
   const connectWallet = async () => {
     try {
+      console.log('Starting wallet connection...')
+      console.log('window.freighter:', window.freighter)
+      setDebugInfo('Checking for Freighter...')
+      
       // Check if Freighter is available
       if (!window.freighter) {
-        alert('Please install Freighter wallet extension')
+        console.error('Freighter not found')
+        setDebugInfo('Freighter not found! Using mock wallet for testing...')
+        
+        // Use mock wallet for testing
+        const mockAddress = 'G' + Math.random().toString(36).substring(2, 57).toUpperCase()
+        console.log('Using mock address:', mockAddress)
+        setWalletAddress(mockAddress)
+        setAuthenticated(mockAddress)
+        setDebugInfo(`Connected with mock wallet: ${mockAddress}`)
         return
       }
       
       setIsAuthenticating(true)
+      console.log('Getting public key...')
+      setDebugInfo('Getting public key...')
+      
       const address = await window.freighter.getPublicKey()
+      console.log('Got public key:', address)
+      setDebugInfo(`Got public key: ${address}`)
       
-      // Check if already authenticated
-      const isAuthed = await checkAuthentication(address)
+      // For now, just connect without challenge signing to test basic functionality
+      setWalletAddress(address)
+      setAuthenticated(address)
+      console.log('Wallet connected successfully')
+      setDebugInfo('Wallet connected successfully!')
       
-      if (isAuthed) {
-        setWalletAddress(address)
-      } else {
-        // Perform challenge-signing authentication
-        const isAuthenticated = await authenticateWithChallenge(address)
-        
-        if (isAuthenticated) {
-          setAuthenticated(address)
-          setWalletAddress(address)
-        } else {
-          alert('Authentication failed. Please try again.')
-        }
-      }
     } catch (error) {
       console.error('Failed to connect wallet:', error)
-      alert('Failed to connect wallet')
+      setDebugInfo(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      alert(`Failed to connect wallet: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setIsAuthenticating(false)
     }
@@ -90,6 +99,14 @@ function App() {
             </div>
           </div>
         </nav>
+        
+        {/* Debug Info */}
+        {debugInfo && (
+          <div className="bg-blue-500/10 border border-blue-500/30 p-4 text-sm text-blue-300">
+            <strong>Debug:</strong> {debugInfo}
+          </div>
+        )}
+        
         <Routes>
           <Route path="/" element={<Landing walletAddress={walletAddress} />} />
           <Route path="/dashboard" element={<Dashboard walletAddress={walletAddress} />} />
