@@ -1,47 +1,94 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Landing from './pages/Landing'
 import Dashboard from './pages/Dashboard'
 import CreateProject from './pages/CreateProject'
 import ProjectDetail from './pages/ProjectDetail'
 import { setAuthenticated, logout } from './utils/auth'
+import { isConnected, requestAccess } from '@stellar/freighter-api'
 
 function App() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [debugInfo, setDebugInfo] = useState<string>('')
+  const [isFreighterReady, setIsFreighterReady] = useState(false)
+
+  // Check for Freighter availability with retry logic
+  useEffect(() => {
+    let retryCount = 0
+    const maxRetries = 10
+    const retryInterval = 200 // ms
+
+    const checkFreighter = async () => {
+      try {
+        console.log(`Checking for Freighter (attempt ${retryCount + 1}/${maxRetries})...`)
+        const connectionResult = await isConnected()
+        console.log('Freighter connection result:', connectionResult)
+        
+        if (connectionResult.isConnected) {
+          setIsFreighterReady(true)
+          setDebugInfo('Freighter detected and ready')
+          return true
+        }
+        
+        if (retryCount < maxRetries - 1) {
+          retryCount++
+          setTimeout(checkFreighter, retryInterval)
+        } else {
+          setDebugInfo('Freighter not detected after retries')
+          return false
+        }
+      } catch (error) {
+        console.error('Error checking Freighter:', error)
+        if (retryCount < maxRetries - 1) {
+          retryCount++
+          setTimeout(checkFreighter, retryInterval)
+        } else {
+          setDebugInfo('Error checking for Freighter')
+          return false
+        }
+      }
+    }
+
+    checkFreighter()
+  }, [])
 
   const connectWallet = async () => {
     try {
       console.log('Starting wallet connection...')
-      console.log('window.freighter:', window.freighter)
-      setDebugInfo('Checking for Freighter...')
+      setDebugInfo('Checking Freighter availability...')
       
       // Check if Freighter is available
-      if (!window.freighter) {
-        console.error('Freighter not found')
-        setDebugInfo('Freighter not found! Using mock wallet for testing...')
-        
-        // Use mock wallet for testing
-        const mockAddress = 'G' + Math.random().toString(36).substring(2, 57).toUpperCase()
-        console.log('Using mock address:', mockAddress)
-        setWalletAddress(mockAddress)
-        setAuthenticated(mockAddress)
-        setDebugInfo(`Connected with mock wallet: ${mockAddress}`)
+      const connectionResult = await isConnected()
+      console.log('Freighter connection result:', connectionResult)
+      
+      if (!connectionResult.isConnected) {
+        console.error('Freighter not connected')
+        setDebugInfo('Freighter not detected. Please install the Freighter extension.')
+        alert('Freighter wallet extension not detected. Please install it from the Chrome Web Store or Firefox Add-ons.')
         return
       }
       
       setIsAuthenticating(true)
-      console.log('Getting public key...')
-      setDebugInfo('Getting public key...')
+      console.log('Requesting access...')
+      setDebugInfo('Requesting wallet access...')
       
-      const address = await window.freighter.getPublicKey()
-      console.log('Got public key:', address)
-      setDebugInfo(`Got public key: ${address}`)
+      const accessResult = await requestAccess()
+      console.log('Access result:', accessResult)
       
-      // For now, just connect without challenge signing to test basic functionality
-      setWalletAddress(address)
-      setAuthenticated(address)
+      if (accessResult.error) {
+        throw new Error(accessResult.error.message)
+      }
+      
+      if (!accessResult.address) {
+        throw new Error('No address returned from Freighter')
+      }
+      
+      console.log('Got address:', accessResult.address)
+      setDebugInfo(`Connected: ${accessResult.address}`)
+      
+      setWalletAddress(accessResult.address)
+      setAuthenticated(accessResult.address)
       console.log('Wallet connected successfully')
       setDebugInfo('Wallet connected successfully!')
       
