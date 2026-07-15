@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, Symbol, Vec, Map, U256Val};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, Vec, symbol_short, String as SorobanString};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -40,7 +40,7 @@ pub enum MilestoneState {
 #[derive(Clone)]
 pub struct Milestone {
     pub amount: i128,
-    pub description: String,
+    pub description: SorobanString,
     pub state: MilestoneState,
     pub delivery_timestamp: u64,
 }
@@ -69,25 +69,15 @@ impl MilestoneEscrow {
         token: Address,
         arbiter: Address,
         milestone_amounts: Vec<i128>,
-        milestone_descriptions: Vec<String>,
+        milestone_descriptions: Vec<SorobanString>,
         review_window_seconds: u64,
     ) -> Result<(), Error> {
-        if env.storage().instance().has(&Symbol::short("init")) {
+        client.require_auth();
+        
+        if env.storage().instance().has(&symbol_short!("init")) {
             return Err(Error::AlreadyInitialized);
         }
         
-        if client.is_none() {
-            return Err(Error::InvalidAddress);
-        }
-        if freelancer.is_none() {
-            return Err(Error::InvalidAddress);
-        }
-        if token.is_none() {
-            return Err(Error::InvalidToken);
-        }
-        if arbiter.is_none() {
-            return Err(Error::InvalidArbiter);
-        }
         if milestone_amounts.is_empty() {
             return Err(Error::NoMilestones);
         }
@@ -99,23 +89,24 @@ impl MilestoneEscrow {
         }
 
         let mut total_amount: i128 = 0;
-        let milestones: Vec<Milestone> = milestone_amounts
-            .iter()
-            .zip(milestone_descriptions.iter())
-            .enumerate()
-            .map(|(i, (amount, desc))| {
-                if *amount <= 0 {
+        let milestones: Vec<Milestone> = {
+            let mut result = Vec::new(&env);
+            for i in 0..milestone_amounts.len() {
+                let amount = milestone_amounts.get(i).unwrap();
+                let desc = milestone_descriptions.get(i).unwrap();
+                if amount <= 0 {
                     panic!("Milestone amount must be positive");
                 }
                 total_amount += amount;
-                Milestone {
-                    amount: *amount,
+                result.push_back(Milestone {
+                    amount,
                     description: desc.clone(),
                     state: MilestoneState::Pending,
                     delivery_timestamp: 0,
-                }
-            })
-            .collect();
+                });
+            }
+            result
+        };
 
         let data = DataKey {
             client: client.clone(),
@@ -127,15 +118,17 @@ impl MilestoneEscrow {
             is_funded: false,
         };
 
-        env.storage().instance().set(&Symbol::short("init"), &true);
-        env.storage().instance().set(&Symbol::short("data"), &data);
-        env.storage().instance().set(&Symbol::short("milestones"), &milestones);
+        env.storage().instance().set(&symbol_short!("init"), &true);
+        env.storage().instance().set(&symbol_short!("data"), &data);
+        env.storage().instance().set(&symbol_short!("mstones"), &milestones);
 
         Ok(())
     }
 
     pub fn fund(env: Env, client: Address, token: Address) -> Result<(), Error> {
-        let data: DataKey = env.storage().instance().get(&Symbol::short("data"))
+        client.require_auth();
+        
+        let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)?;
         
         if data.client != client {
@@ -150,12 +143,12 @@ impl MilestoneEscrow {
 
         // Token transfer would be handled via cross-contract call
         // For now, we'll mark as funded
-        let mut updated_data = data;
+        let mut updated_data = data.clone();
         updated_data.is_funded = true;
-        env.storage().instance().set(&Symbol::short("data"), &updated_data);
+        env.storage().instance().set(&symbol_short!("data"), &updated_data);
 
         env.events().publish(
-            (Symbol::short("funded"), client),
+            (symbol_short!("funded"), client),
             (data.total_escrow_amount, env.ledger().sequence()),
         );
 
@@ -163,7 +156,9 @@ impl MilestoneEscrow {
     }
 
     pub fn mark_delivered(env: Env, freelancer: Address, milestone_index: u32) -> Result<(), Error> {
-        let data: DataKey = env.storage().instance().get(&Symbol::short("data"))
+        freelancer.require_auth();
+        
+        let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)?;
         
         if data.freelancer != freelancer {
@@ -173,24 +168,30 @@ impl MilestoneEscrow {
             return Err(Error::NotFunded);
         }
 
-        let mut milestones: Vec<Milestone> = env.storage().instance().get(&Symbol::short("milestones"))
+        let mut milestones: Vec<Milestone> = env.storage().instance().get(&symbol_short!("mstones"))
             .ok_or(Error::NoMilestones)?;
         
-        if milestone_index as usize >= milestones.len() {
+        let len = milestones.len();
+        if milestone_index >= len {
             return Err(Error::InvalidMilestoneIndex);
         }
         
-        if milestones[milestone_index as usize].state != MilestoneState::Pending {
+        let milestone = milestones.get(milestone_index).unwrap();
+        if milestone.state != MilestoneState::Pending {
             return Err(Error::MilestoneNotPending);
         }
 
-        milestones[milestone_index as usize].state = MilestoneState::Delivered;
-        milestones[milestone_index as usize].delivery_timestamp = env.ledger().timestamp();
+        milestones.set(milestone_index, Milestone {
+            amount: milestone.amount,
+            description: milestone.description.clone(),
+            state: MilestoneState::Delivered,
+            delivery_timestamp: env.ledger().timestamp(),
+        });
         
-        env.storage().instance().set(&Symbol::short("milestones"), &milestones);
+        env.storage().instance().set(&symbol_short!("mstones"), &milestones);
 
         env.events().publish(
-            (Symbol::short("delivered"), milestone_index, freelancer),
+            (symbol_short!("delivered"), milestone_index, freelancer),
             env.ledger().timestamp(),
         );
 
@@ -198,69 +199,88 @@ impl MilestoneEscrow {
     }
 
     pub fn approve(env: Env, client: Address, milestone_index: u32) -> Result<(), Error> {
-        let data: DataKey = env.storage().instance().get(&Symbol::short("data"))
+        client.require_auth();
+        
+        let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)?;
         
         if data.client != client {
             return Err(Error::NotClient);
         }
 
-        let mut milestones: Vec<Milestone> = env.storage().instance().get(&Symbol::short("milestones"))
+        let mut milestones: Vec<Milestone> = env.storage().instance().get(&symbol_short!("mstones"))
             .ok_or(Error::NoMilestones)?;
         
-        if milestone_index as usize >= milestones.len() {
+        let len = milestones.len();
+        if milestone_index >= len {
             return Err(Error::InvalidMilestoneIndex);
         }
         
-        if milestones[milestone_index as usize].state != MilestoneState::Delivered {
+        let milestone = milestones.get(milestone_index).unwrap();
+        if milestone.state != MilestoneState::Delivered {
             return Err(Error::MilestoneNotDelivered);
         }
 
         // Token transfer would be handled via cross-contract call
-        milestones[milestone_index as usize].state = MilestoneState::Released;
+        milestones.set(milestone_index, Milestone {
+            amount: milestone.amount,
+            description: milestone.description.clone(),
+            state: MilestoneState::Released,
+            delivery_timestamp: milestone.delivery_timestamp,
+        });
         
-        env.storage().instance().set(&Symbol::short("milestones"), &milestones);
+        env.storage().instance().set(&symbol_short!("mstones"), &milestones);
 
         env.events().publish(
-            (Symbol::short("approved"), milestone_index, client),
-            (milestones[milestone_index as usize].amount, env.ledger().timestamp()),
+            (symbol_short!("approved"), milestone_index, client),
+            (milestone.amount, env.ledger().timestamp()),
         );
 
         Ok(())
     }
 
-    pub fn raise_dispute(env: Env, client: Address, milestone_index: u32) -> Result<(), Error> {
-        let data: DataKey = env.storage().instance().get(&Symbol::short("data"))
+    pub fn raise_dispute(env: Env, caller: Address, milestone_index: u32) -> Result<(), Error> {
+        caller.require_auth();
+        
+        let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)?;
         
-        if data.client != client {
+        // Allow both client and freelancer to raise disputes
+        if data.client != caller && data.freelancer != caller {
             return Err(Error::NotClient);
         }
 
-        let mut milestones: Vec<Milestone> = env.storage().instance().get(&Symbol::short("milestones"))
+        let mut milestones: Vec<Milestone> = env.storage().instance().get(&symbol_short!("mstones"))
             .ok_or(Error::NoMilestones)?;
         
-        if milestone_index as usize >= milestones.len() {
+        let len = milestones.len();
+        if milestone_index >= len {
             return Err(Error::InvalidMilestoneIndex);
         }
         
-        if milestones[milestone_index as usize].state != MilestoneState::Delivered {
+        let milestone = milestones.get(milestone_index).unwrap();
+        if milestone.state != MilestoneState::Delivered {
             return Err(Error::MilestoneNotDelivered);
         }
 
-        let delivery_time = milestones[milestone_index as usize].delivery_timestamp;
+        let delivery_time = milestone.delivery_timestamp;
         let current_time = env.ledger().timestamp();
         
         if current_time >= delivery_time + data.review_window_seconds {
             return Err(Error::ReviewWindowExpired);
         }
 
-        milestones[milestone_index as usize].state = MilestoneState::Disputed;
+        milestones.set(milestone_index, Milestone {
+            amount: milestone.amount,
+            description: milestone.description.clone(),
+            state: MilestoneState::Disputed,
+            delivery_timestamp: milestone.delivery_timestamp,
+        });
         
-        env.storage().instance().set(&Symbol::short("milestones"), &milestones);
+        env.storage().instance().set(&symbol_short!("mstones"), &milestones);
 
         env.events().publish(
-            (Symbol::short("disputed"), milestone_index, client),
+            (symbol_short!("disputed"), milestone_index, caller),
             env.ledger().timestamp(),
         );
 
@@ -273,21 +293,25 @@ impl MilestoneEscrow {
         milestone_index: u32,
         client_bps: u32,
     ) -> Result<(), Error> {
-        let data: DataKey = env.storage().instance().get(&Symbol::short("data"))
+        arbiter.require_auth();
+        
+        let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)?;
         
         if data.arbiter != arbiter {
             return Err(Error::NotClient);
         }
 
-        let mut milestones: Vec<Milestone> = env.storage().instance().get(&Symbol::short("milestones"))
+        let mut milestones: Vec<Milestone> = env.storage().instance().get(&symbol_short!("mstones"))
             .ok_or(Error::NoMilestones)?;
         
-        if milestone_index as usize >= milestones.len() {
+        let len = milestones.len();
+        if milestone_index >= len {
             return Err(Error::InvalidMilestoneIndex);
         }
         
-        if milestones[milestone_index as usize].state != MilestoneState::Disputed {
+        let milestone = milestones.get(milestone_index).unwrap();
+        if milestone.state != MilestoneState::Disputed {
             return Err(Error::MilestoneNotDisputed);
         }
 
@@ -295,17 +319,22 @@ impl MilestoneEscrow {
             return Err(Error::InvalidBasisPoints);
         }
 
-        let amount = milestones[milestone_index as usize].amount;
+        let amount = milestone.amount;
         let client_amount = (amount * client_bps as i128) / 10000;
         let freelancer_amount = amount - client_amount;
 
         // Token transfers would be handled via cross-contract calls
-        milestones[milestone_index as usize].state = MilestoneState::Resolved;
+        milestones.set(milestone_index, Milestone {
+            amount: milestone.amount,
+            description: milestone.description.clone(),
+            state: MilestoneState::Resolved,
+            delivery_timestamp: milestone.delivery_timestamp,
+        });
         
-        env.storage().instance().set(&Symbol::short("milestones"), &milestones);
+        env.storage().instance().set(&symbol_short!("mstones"), &milestones);
 
         env.events().publish(
-            (Symbol::short("resolved"), milestone_index, arbiter),
+            (symbol_short!("resolved"), milestone_index, arbiter),
             (client_amount, freelancer_amount, env.ledger().timestamp()),
         );
 
@@ -313,25 +342,29 @@ impl MilestoneEscrow {
     }
 
     pub fn claim_after_timeout(env: Env, freelancer: Address, milestone_index: u32) -> Result<(), Error> {
-        let data: DataKey = env.storage().instance().get(&Symbol::short("data"))
+        freelancer.require_auth();
+        
+        let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)?;
         
         if data.freelancer != freelancer {
             return Err(Error::NotClient);
         }
 
-        let mut milestones: Vec<Milestone> = env.storage().instance().get(&Symbol::short("milestones"))
+        let mut milestones: Vec<Milestone> = env.storage().instance().get(&symbol_short!("mstones"))
             .ok_or(Error::NoMilestones)?;
         
-        if milestone_index as usize >= milestones.len() {
+        let len = milestones.len();
+        if milestone_index >= len {
             return Err(Error::InvalidMilestoneIndex);
         }
         
-        if milestones[milestone_index as usize].state != MilestoneState::Delivered {
+        let milestone = milestones.get(milestone_index).unwrap();
+        if milestone.state != MilestoneState::Delivered {
             return Err(Error::MilestoneNotDelivered);
         }
 
-        let delivery_time = milestones[milestone_index as usize].delivery_timestamp;
+        let delivery_time = milestone.delivery_timestamp;
         let current_time = env.ledger().timestamp();
         
         if current_time < delivery_time + data.review_window_seconds {
@@ -339,20 +372,27 @@ impl MilestoneEscrow {
         }
 
         // Token transfer would be handled via cross-contract call
-        milestones[milestone_index as usize].state = MilestoneState::Released;
+        milestones.set(milestone_index, Milestone {
+            amount: milestone.amount,
+            description: milestone.description.clone(),
+            state: MilestoneState::Released,
+            delivery_timestamp: milestone.delivery_timestamp,
+        });
         
-        env.storage().instance().set(&Symbol::short("milestones"), &milestones);
+        env.storage().instance().set(&symbol_short!("mstones"), &milestones);
 
         env.events().publish(
-            (Symbol::short("released"), milestone_index, freelancer),
-            (milestones[milestone_index as usize].amount, env.ledger().timestamp()),
+            (symbol_short!("released"), milestone_index, freelancer),
+            (milestone.amount, env.ledger().timestamp()),
         );
 
         Ok(())
     }
 
     pub fn cancel_unfunded_project(env: Env, client: Address) -> Result<(), Error> {
-        let data: DataKey = env.storage().instance().get(&Symbol::short("data"))
+        client.require_auth();
+        
+        let data: DataKey = env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)?;
         
         if data.client != client {
@@ -362,7 +402,7 @@ impl MilestoneEscrow {
             return Err(Error::AlreadyFunded);
         }
 
-        let milestones: Vec<Milestone> = env.storage().instance().get(&Symbol::short("milestones"))
+        let milestones: Vec<Milestone> = env.storage().instance().get(&symbol_short!("mstones"))
             .ok_or(Error::NoMilestones)?;
         
         for milestone in milestones.iter() {
@@ -372,7 +412,7 @@ impl MilestoneEscrow {
         }
 
         env.events().publish(
-            (Symbol::short("cancelled"), client),
+            (symbol_short!("cancelled"), client),
             env.ledger().timestamp(),
         );
 
@@ -381,31 +421,32 @@ impl MilestoneEscrow {
 
     // View functions
     pub fn get_data(env: Env) -> Result<DataKey, Error> {
-        env.storage().instance().get(&Symbol::short("data"))
+        env.storage().instance().get(&symbol_short!("data"))
             .ok_or(Error::AlreadyInitialized)
     }
 
     pub fn get_milestones(env: Env) -> Result<Vec<Milestone>, Error> {
-        env.storage().instance().get(&Symbol::short("milestones"))
+        env.storage().instance().get(&symbol_short!("mstones"))
             .ok_or(Error::NoMilestones)
     }
 
     pub fn get_milestone(env: Env, index: u32) -> Result<Milestone, Error> {
-        let milestones: Vec<Milestone> = env.storage().instance().get(&Symbol::short("milestones"))
+        let milestones: Vec<Milestone> = env.storage().instance().get(&symbol_short!("mstones"))
             .ok_or(Error::NoMilestones)?;
         
-        if index as usize >= milestones.len() {
+        let len = milestones.len();
+        if index >= len {
             return Err(Error::InvalidMilestoneIndex);
         }
         
-        Ok(milestones[index as usize].clone())
+        Ok(milestones.get(index).unwrap().clone())
     }
 
     pub fn milestone_count(env: Env) -> Result<u32, Error> {
-        let milestones: Vec<Milestone> = env.storage().instance().get(&Symbol::short("milestones"))
+        let milestones: Vec<Milestone> = env.storage().instance().get(&symbol_short!("mstones"))
             .ok_or(Error::NoMilestones)?;
         
-        Ok(milestones.len() as u32)
+        Ok(milestones.len())
     }
 }
 
