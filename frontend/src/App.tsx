@@ -4,9 +4,11 @@ import Landing from './pages/Landing'
 import Dashboard from './pages/Dashboard'
 import CreateProject from './pages/CreateProject'
 import ProjectDetail from './pages/ProjectDetail'
+import { authenticateWithChallenge, checkAuthentication, setAuthenticated, logout } from './utils/auth'
 
 function App() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null)
+  const [isAuthenticating, setIsAuthenticating] = useState(false)
 
   const connectWallet = async () => {
     try {
@@ -16,15 +18,37 @@ function App() {
         return
       }
       
+      setIsAuthenticating(true)
       const address = await window.freighter.getPublicKey()
-      setWalletAddress(address)
+      
+      // Check if already authenticated
+      const isAuthed = await checkAuthentication(address)
+      
+      if (isAuthed) {
+        setWalletAddress(address)
+      } else {
+        // Perform challenge-signing authentication
+        const isAuthenticated = await authenticateWithChallenge(address)
+        
+        if (isAuthenticated) {
+          setAuthenticated(address)
+          setWalletAddress(address)
+        } else {
+          alert('Authentication failed. Please try again.')
+        }
+      }
     } catch (error) {
       console.error('Failed to connect wallet:', error)
       alert('Failed to connect wallet')
+    } finally {
+      setIsAuthenticating(false)
     }
   }
 
   const disconnectWallet = () => {
+    if (walletAddress) {
+      logout(walletAddress)
+    }
     setWalletAddress(null)
   }
 
@@ -56,9 +80,10 @@ function App() {
                 ) : (
                   <button
                     onClick={connectWallet}
-                    className="px-4 py-2 bg-success text-white rounded hover:bg-success-hover"
+                    disabled={isAuthenticating}
+                    className="px-4 py-2 bg-success text-white rounded hover:bg-success-hover disabled:opacity-50"
                   >
-                    Connect Wallet
+                    {isAuthenticating ? 'Authenticating...' : 'Connect Wallet'}
                   </button>
                 )}
               </div>
